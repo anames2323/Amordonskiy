@@ -1,6 +1,9 @@
-token = '8762089094:AAGaxAPmNWPg3-4WePkNZCaRw7Yvuq0GQRc'  # Токен бота
-NICNAME_BOT = 'anonimmassagingbot'  # username бота без @
+import os
 
-# ID ГЛАВНОГО АДМИНИСТРАТОРА (ВАШ ID)
-# Получить свой ID можно у бота @getmyid_bot
-MAIN_ADMIN_ID = 8795006636  # 👈 ЗАМЕНИТЕ НА СВОЙ ID!
+# Получаем токен из переменных окружения Render
+token = os.getenv('BOT_TOKEN')
+NICNAME_BOT = os.getenv('NICNAME_BOT', 'anonimmassagingbot')
+MAIN_ADMIN_ID = int(os.getenv('MAIN_ADMIN_ID', 0))
+
+if not token:
+    raise ValueError("BOT_TOKEN не найден в переменных окружения!")

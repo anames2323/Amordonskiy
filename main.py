@@ -135,34 +135,140 @@ async def check_sub_callback(callback: types.CallbackQuery):
 # ---------- КОМАНДА /start ----------
 @dp.message_handler(commands=['start'], state='*')
 async def cmd_start(message: types.Message, state: FSMContext):
+    # 1. ВСЕГДА запускаем базу данных
     db.db_start()
     
-    # Проверяем подписку на все каналы
-    is_subscribed, _ = await check_all_subscriptions(message.from_user.id)
+    # 2. Получаем ID пользователя, который нажал на ссылку
+    user_id = message.from_user.id
+    username = message.from_user.username
+    
+    # 3. Проверяем, есть ли у пользователя username
+    if username is None:
+        return await message.answer(
+            '⚠️ Установите @username в настройках Telegram и снова нажмите /start'
+        )
+    
+    # 4. Проверяем подписку на каналы (если они есть)
+    is_subscribed, channel_id = await check_all_subscriptions(user_id)
     if not is_subscribed:
         await require_subscription(message)
         return
     
-    if message.from_user.username is None:
-        return await message.answer('Установите @username и пропишите /start')
+    # 5. ИЗВЛЕКАЕМ ID ТОГО, КОМУ НУЖНО ОТПРАВИТЬ СООБЩЕНИЕ
+    # Если ссылка: t.me/bot?start=123, то message.text = "/start 123"
+    # Если ссылка: t.me/bot?start, то message.text = "/start"
+    start_cmd = message.text
+    referi_id = start_cmd[7:].strip()  # Убираем "/start " и пробелы
     
-    # Добавляем пользователя, если его нет
-    if not db.user_exists(message.from_user.id):
-        db.add_user(message.from_user.id, message.from_user.username)
-        await message.answer(
-            '🎉 <b>Добро пожаловать в Анонимный Бот!</b>\n\n'
-            '📋 Вот твоя личная ссылка:\n\n'
-            f't.me/{NICNAME_BOT}?start={message.from_user.id}\n\n'
-            'Опубликуй её и получай анонимные сообщения\n\n'
-            '🔹 <b>Что можно делать:</b>\n'
-            '• Отправлять анонимные сообщения\n'
-            '• Получать и отвечать на сообщения\n'
-            '• Смотреть свою статистику\n'
-            '• Получать достижения\n'
-            '• Создавать анонимные чаты\n'
-            '• И многое другое!',
-            reply_markup=user_keyboard(),
-            parse_mode='HTML'
+    # 6. Проверяем, зарегистрирован ли пользователь
+    if not db.user_exists(user_id):
+        # --- НОВЫЙ ПОЛЬЗОВАТЕЛЬ ---
+        if referi_id and referi_id != str(user_id):
+            # ЕСТЬ РЕФЕРАЛ И ЭТО НЕ ОН САМ
+            # Получаем username реферала (того, кому пишут)
+            referi_username = db.username_referi(referi_id)
+            if referi_username:
+                referi_username = referi_username[0]
+            else:
+                referi_username = "Unknown"
+            
+            # Сохраняем пользователя в БД с рефералом
+            db.add_user_referi(
+                user_id=user_id,
+                username=username,
+                refere_id=referi_id,
+                username_referi=referi_username
+            )
+            
+            # Показываем форму для отправки сообщения
+            await message.answer(
+                '📝 <b>Напиши сообщение человеку, который опубликовал эту ссылку</b>\n\n'
+                '📸 Ты можешь отправить:\n'
+                '• Текст\n'
+                '• Фото\n'
+                '• Голосовое сообщение\n'
+                '• Аудиофайл\n'
+                '• Видео\n'
+                '• Документ\n'
+                '• Стикер\n\n'
+                'Отправь своё сообщение:', 
+                reply_markup=kb_back,
+                parse_mode='HTML'
+            )
+            await Send_Message.text.set()
+            await state.update_data(name=referi_id)
+            
+        else:
+            # НЕТ РЕФЕРАЛА ИЛИ РЕФЕРАЛ = ОН САМ
+            db.add_user_no_referi(user_id, username, 0)
+            
+            if referi_id == str(user_id):
+                await message.answer(
+                    "❌ Нельзя отправлять вопросы самому себе!\n\n"
+                    "📋 Вот твоя личная ссылка:\n\n"
+                    f"<code>t.me/{NICNAME_BOT}?start={user_id}</code>\n\n"
+                    "Опубликуй её, чтобы получать анонимные сообщения от других!",
+                    parse_mode='HTML',
+                    reply_markup=user_keyboard()
+                )
+            else:
+                await message.answer(
+                    '📋 Вот твоя личная ссылка:\n\n'
+                    f'<code>t.me/{NICNAME_BOT}?start={user_id}</code>\n\n'
+                    'Опубликуй её и получай анонимные сообщения',
+                    parse_mode='HTML',
+                    reply_markup=user_keyboard()
+                )
+    
+    else:
+        # --- СУЩЕСТВУЮЩИЙ ПОЛЬЗОВАТЕЛЬ ---
+        db.update_user_activity(user_id)
+        
+        if referi_id and referi_id != str(user_id):
+            # Пользователь уже зарегистрирован, но хочет отправить сообщение другому
+            await message.answer(
+                '📝 <b>Напиши сообщение человеку, который опубликовал эту ссылку</b>\n\n'
+                '📸 Ты можешь отправить:\n'
+                '• Текст\n'
+                '• Фото\n'
+                '• Голосовое сообщение\n'
+                '• Аудиофайл\n'
+                '• Видео\n'
+                '• Документ\n'
+                '• Стикер\n\n'
+                'Отправь своё сообщение:', 
+                reply_markup=kb_back,
+                parse_mode='HTML'
+            )
+            await Send_Message.text.set()
+            await state.update_data(name=referi_id)
+            
+        else:
+            # Просто открыл бота
+            if referi_id == str(user_id):
+                await message.answer(
+                    "❌ Нельзя отправлять вопросы самому себе!\n\n"
+                    "📋 Вот твоя личная ссылка:\n\n"
+                    f"<code>t.me/{NICNAME_BOT}?start={user_id}</code>\n\n"
+                    "Опубликуй её, чтобы получать анонимные сообщения от других!",
+                    parse_mode='HTML',
+                    reply_markup=user_keyboard()
+                )
+            else:
+                if db.is_admin(user_id):
+                    await message.answer(
+                        f"👋 Привет, админ {message.from_user.first_name}!\n\n"
+                        "Выберите действие:",
+                        reply_markup=admin_keyboard()
+                    )
+                else:
+                    await message.answer(
+                        '👋 С возвращением!\n\n'
+                        '📋 Твоя личная ссылка:\n\n'
+                        f'<code>t.me/{NICNAME_BOT}?start={user_id}</code>\n\n'
+                        'Опубликуй её и получай анонимные сообщения',
+                        parse_mode='HTML',
+                        reply_markup=user_keyboard()
         )
         return
     
